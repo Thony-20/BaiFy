@@ -1,0 +1,103 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // HELPER: obtiene el empresaId del usuario autenticado
+    // ============================================================
+    function getUserEmpresaId() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.empresaId;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol;
+    }
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwnerEmpresa(empresaId) {
+      return isAuthenticated() && getUserEmpresaId() == empresaId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+
+    // ============================================================
+    // EMPRESAS
+    // ============================================================
+    match /empresas/{empresaId} {
+      // Solo miembros de la empresa pueden leer
+      allow read: if isOwnerEmpresa(empresaId);
+      // Solo se puede crear al registrarse (validado por el flujo de auth)
+      allow create: if isAuthenticated();
+      // Solo admin puede actualizar
+      allow update: if isOwnerEmpresa(empresaId) && isAdmin();
+      allow delete: if false; // Nunca se eliminan empresas
+    }
+
+    // ============================================================
+    // USUARIOS
+    // ============================================================
+    match /usuarios/{userId} {
+      // Un usuario puede leer su propio documento
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        getUserEmpresaId() == resource.data.empresaId
+      );
+      // Se puede crear al registrarse
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      // Solo admin de la misma empresa puede actualizar otros usuarios
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (isAdmin() && getUserEmpresaId() == resource.data.empresaId)
+      );
+      allow delete: if false;
+    }
+
+    // ============================================================
+    // PRODUCTOS
+    // ============================================================
+    match /productos/{productoId} {
+      // Solo lectura si pertenece a la empresa del usuario
+      allow read: if isOwnerEmpresa(resource.data.empresaId);
+
+      // Crear: el empresaId del documento DEBE ser el del usuario
+      allow create: if isAuthenticated()
+        && request.resource.data.empresaId == getUserEmpresaId()
+        && request.resource.data.nombre is string
+        && request.resource.data.nombre.size() > 0
+        && request.resource.data.stock is int
+        && request.resource.data.stock >= 0;
+
+      // Actualizar: solo si pertenece a la empresa y el empresaId no cambia
+      // Además stock no puede ser negativo
+      allow update: if isOwnerEmpresa(resource.data.empresaId)
+        && request.resource.data.empresaId == resource.data.empresaId
+        && request.resource.data.stock >= 0;
+
+      // Eliminar: solo admin de la misma empresa
+      allow delete: if isOwnerEmpresa(resource.data.empresaId) && isAdmin();
+    }
+
+    // ============================================================
+    // MOVIMIENTOS DE STOCK
+    // ============================================================
+    match /movimientos_stock/{movimientoId} {
+      // Solo lectura si pertenece a la empresa
+      allow read: if isOwnerEmpresa(resource.data.empresaId);
+
+      // Crear: empresaId debe coincidir con el del usuario
+      allow create: if isAuthenticated()
+        && request.resource.data.empresaId == getUserEmpresaId()
+        && request.resource.data.cantidad is int
+        && request.resource.data.cantidad > 0
+        && request.resource.data.tipo in ['incremento', 'reduccion'];
+
+      // Movimientos son inmutables
+      allow update, delete: if false;
+    }
+  }
+}

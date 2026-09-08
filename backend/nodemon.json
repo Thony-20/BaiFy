@@ -1,0 +1,20 @@
+{
+  "watch": [
+    "server.js",
+    "config",
+    "controllers",
+    "middleware",
+    "routes",
+    "utils"
+  ],
+  "ext": "js,json",
+  "ignore": [
+    "scratch/**",
+    "scripts/**",
+    "node_modules/**",
+    "serviceAccountKey.json",
+    ".env"
+  ],
+  "legacyWatch": true,
+  "delay": 750
+}
