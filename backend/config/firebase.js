@@ -8,39 +8,68 @@ import { installFirestoreReadMeter } from '../utils/firestoreMeter.js';
 
 dotenv.config({ quiet: true });
 
-// Inicialización de Firebase Admin para acceso a la base de datos (Firestore)
-const serviceAccountPath = path.resolve('./serviceAccountKey.json');
-let adminApp;
+function parseServiceAccountFromEnv() {
+    const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (!raw) return null;
 
-if (getApps().length > 0) {
-    adminApp = getApps()[0];
-} else if (fs.existsSync(serviceAccountPath)) {
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-    adminApp = adminInitializeApp({
-        credential: cert(serviceAccount)
-    });
-    console.log("✅ Firebase Admin inicializado con 'serviceAccountKey.json'");
-} else {
-    console.warn("\n⚠️ ADVERTENCIA: No se encontró 'serviceAccountKey.json' en la raíz del backend.");
-    console.warn("Firebase Admin intentará usar Application Default Credentials.");
-    console.warn("Para obtener acceso total, descarga tu clave de servicio desde Firebase Console e insértala en la carpeta backend.\n");
-    adminApp = adminInitializeApp();
-    console.log("ℹ️ Firebase Admin inicializado con Default Credentials");
+    try {
+        return JSON.parse(raw);
+    } catch {
+        try {
+            const decoded = Buffer.from(raw, 'base64').toString('utf8');
+            return JSON.parse(decoded);
+        } catch {
+            console.error(
+                '❌ FIREBASE_SERVICE_ACCOUNT no es JSON válido ni Base64 de JSON.'
+            );
+            return null;
+        }
+    }
 }
+
+function initializeAdminApp() {
+    if (getApps().length > 0) {
+        return getApps()[0];
+    }
+
+    const fromEnv = parseServiceAccountFromEnv();
+    if (fromEnv) {
+        console.log('✅ Firebase Admin inicializado con FIREBASE_SERVICE_ACCOUNT');
+        return adminInitializeApp({
+            credential: cert(fromEnv)
+        });
+    }
+
+    const serviceAccountPath = path.resolve('./serviceAccountKey.json');
+    if (fs.existsSync(serviceAccountPath)) {
+        const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+        console.log("✅ Firebase Admin inicializado con 'serviceAccountKey.json'");
+        return adminInitializeApp({
+            credential: cert(serviceAccount)
+        });
+    }
+
+    console.warn("\n⚠️ ADVERTENCIA: No hay credenciales de Firebase Admin.");
+    console.warn('En Vercel define FIREBASE_SERVICE_ACCOUNT (JSON o Base64).');
+    console.warn('En local usa backend/serviceAccountKey.json.\n');
+    console.log('ℹ️ Firebase Admin intentará Application Default Credentials');
+    return adminInitializeApp();
+}
+
+const adminApp = initializeAdminApp();
 
 export const adminDb = getFirestore(adminApp);
 export const adminAuth = getAuth(adminApp);
 
 installFirestoreReadMeter(adminDb);
 
-// Configuración pública para la API REST de Auth (Identity Toolkit)
 const firebaseApiKey = process.env.FIREBASE_API_KEY;
 if (!firebaseApiKey) {
     console.warn(
-        "⚠️ Falta FIREBASE_API_KEY en backend/.env. Copia backend/.env.example y completa los valores."
+        '⚠️ Falta FIREBASE_API_KEY en el entorno. Copia backend/.env.example y completa los valores.'
     );
 }
 
 export const firebaseClientConfig = {
-    apiKey: firebaseApiKey || ""
+    apiKey: firebaseApiKey || ''
 };

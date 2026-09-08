@@ -91,6 +91,7 @@ npm run dev
 | `PORT` | No | Puerto del servidor (default `3000`) |
 | `HOST` | No | Host de escucha (default `127.0.0.1`) |
 | `FIREBASE_API_KEY` | Media* | Web API Key de Firebase (Auth REST) |
+| `FIREBASE_SERVICE_ACCOUNT` | **Sí** | JSON (o Base64) de la service account — requerido en Vercel |
 | `UPSTASH_REDIS_REST_URL` | Media | URL REST de Upstash (opcional) |
 | `UPSTASH_REDIS_REST_TOKEN` | **Sí** | Token de Upstash — nunca publicar |
 | `PABILO_API_KEY` | **Sí** | Clave de Pabilo para pagos (opcional) |
@@ -164,6 +165,37 @@ Baify Project/
 
 - Índicees: ver `firestore.indexes.json` en la raíz
 - Reglas de ejemplo: `frontend/firestore.rules` (despliega en Firebase Console → Firestore → Rules)
+
+## Despliegue en Vercel (Services)
+
+El monorepo se despliega como **un solo proyecto** con `vercel.json`:
+
+- `frontend` (Vite) en `/`
+- `backend` (Express) en `/api/*`
+
+### 1. En la UI de Vercel
+
+1. Framework Preset: **Services**
+2. Root Directory: `./`
+3. Confirma que detecta `frontend` y `backend`
+4. Deploy (después de configurar variables)
+
+### 2. Variables de entorno (Project Settings → Environment Variables)
+
+| Variable | Servicio | Notas |
+|----------|----------|--------|
+| `VITE_API_URL` | Build del frontend | Usa `/api` |
+| `FIREBASE_API_KEY` | Backend | Web API Key de Firebase |
+| `FIREBASE_SERVICE_ACCOUNT` | Backend | JSON completo de la service account (una línea) o Base64 |
+| `UPSTASH_REDIS_REST_URL` | Backend | Opcional |
+| `UPSTASH_REDIS_REST_TOKEN` | Backend | Opcional |
+| `PABILO_API_KEY` | Backend | Opcional |
+
+Para `FIREBASE_SERVICE_ACCOUNT`: abre `backend/serviceAccountKey.json`, copia todo el JSON en una sola línea y pégalo como valor de la variable. **No subas ese archivo a Git.**
+
+### 3. Firebase Auth
+
+En Firebase Console → Authentication → Settings → Authorized domains, agrega tu dominio de Vercel (ej. `bai-fy.vercel.app`).
 
 ## Seguridad al publicar en GitHub
 
