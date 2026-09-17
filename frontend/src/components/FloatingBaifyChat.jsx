@@ -74,6 +74,7 @@ export default function FloatingBaifyChat() {
             sx={{
               position: 'absolute',
               inset: '-120%',
+              pointerEvents: 'none',
               background: `conic-gradient(from 0deg,
                 transparent 0deg,
                 transparent 300deg,
@@ -96,6 +97,7 @@ export default function FloatingBaifyChat() {
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
+              minHeight: 0,
               bgcolor: t.bg,
               border: 'none',
               backgroundImage: 'none',

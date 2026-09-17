@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const STAGES = [
@@ -11,6 +11,12 @@ const STAGES = [
 
 const VIDEO_SRC = '/login-inventory.mp4';
 const WAITING_PROGRESS_CAP = 95;
+/** Nunca dejar al usuario atrapado en el overlay (red lenta / prefetch colgado). */
+const OVERLAY_HARD_CAP_MS = 18_000;
+/** Tras tener datos listos, esperar un poco al video y luego continuar (Android a veces no dispara `ended`). */
+const READY_SKIP_GRACE_MS = 3_500;
+/** Sin avance de reproducción → tratar el video como terminado o fallido. */
+const PLAYBACK_STALL_MS = 7_000;
 
 function stageLabel(progress) {
   const stage = STAGES.find((s) => progress <= s.until) ?? STAGES[STAGES.length - 1];
@@ -19,23 +25,52 @@ function stageLabel(progress) {
 
 /**
  * Pantalla de entrada post-login con el video de inventario + progreso.
- * El overlay solo termina cuando `ready` es true (datos del panel listos).
- * Si el video acaba antes, se queda pausado en el último frame.
+ * Termina cuando los datos están listos y el video acabó (o fallbacks en móvil).
  */
 export default function InventoryEntryOverlay({ open, ready = false, onComplete }) {
   const videoRef = useRef(null);
   const completedRef = useRef(false);
   const videoEndedRef = useRef(false);
   const readyRef = useRef(ready);
+  const progressRef = useRef(0);
+  const lastPlaybackAtRef = useRef(0);
+  const lastVideoTimeRef = useRef(0);
+  const playbackStartedRef = useRef(false);
   const [progress, setProgress] = useState(0);
 
   readyRef.current = ready;
+  progressRef.current = progress;
+
+  const completeOnce = useCallback(() => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    setProgress(100);
+    window.setTimeout(() => onComplete?.(), 320);
+  }, [onComplete]);
+
+  const markVideoDone = useCallback(() => {
+    videoEndedRef.current = true;
+    setProgress((prev) => Math.max(prev, WAITING_PROGRESS_CAP));
+  }, []);
+
+  const tryFinish = useCallback(() => {
+    if (!readyRef.current || !videoEndedRef.current) return;
+    completeOnce();
+  }, [completeOnce]);
+
+  const forceFinishOverlay = useCallback(() => {
+    markVideoDone();
+    completeOnce();
+  }, [completeOnce, markVideoDone]);
 
   useEffect(() => {
     if (!open) {
       setProgress(0);
       completedRef.current = false;
       videoEndedRef.current = false;
+      playbackStartedRef.current = false;
+      lastPlaybackAtRef.current = 0;
+      lastVideoTimeRef.current = 0;
       return undefined;
     }
 
@@ -44,33 +79,73 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
 
     completedRef.current = false;
     videoEndedRef.current = false;
+    playbackStartedRef.current = false;
+    lastPlaybackAtRef.current = Date.now();
+    lastVideoTimeRef.current = 0;
     video.currentTime = 0;
     video.loop = false;
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', 'true');
+    video.setAttribute('x5-playsinline', 'true');
 
-    const finish = () => {
-      if (completedRef.current) return;
-      completedRef.current = true;
-      setProgress(100);
-      window.setTimeout(() => onComplete?.(), 320);
-    };
+    const hardCapTimer = window.setTimeout(forceFinishOverlay, OVERLAY_HARD_CAP_MS);
 
-    const tryFinish = () => {
-      if (!readyRef.current || !videoEndedRef.current) return;
-      finish();
-    };
-
-    const playPromise = video.play();
-    if (playPromise && typeof playPromise.catch === 'function') {
-      playPromise.catch(() => {
-        // Autoplay bloqueado: si los datos ya están listos, no atrapar al usuario
-        videoEndedRef.current = true;
+    const stallTimer = window.setInterval(() => {
+      if (completedRef.current || videoEndedRef.current) return;
+      const sinceProgress = Date.now() - lastPlaybackAtRef.current;
+      if (sinceProgress >= PLAYBACK_STALL_MS) {
+        markVideoDone();
         tryFinish();
-      });
-    }
+        if (readyRef.current) {
+          completeOnce();
+        }
+      }
+    }, 800);
+
+    const notePlaybackProgress = () => {
+      lastPlaybackAtRef.current = Date.now();
+    };
+
+    const startPlayback = () => {
+      if (playbackStartedRef.current || completedRef.current) return;
+      playbackStartedRef.current = true;
+      notePlaybackProgress();
+
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => notePlaybackProgress())
+          .catch(() => {
+            markVideoDone();
+            tryFinish();
+            if (readyRef.current) {
+              completeOnce();
+            }
+          });
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      notePlaybackProgress();
+      if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+        startPlayback();
+      }
+    };
+
+    const handleCanPlay = () => {
+      startPlayback();
+    };
 
     const handleTimeUpdate = () => {
       const duration = video.duration;
-      if (!duration || Number.isNaN(duration)) return;
+      if (video.currentTime > lastVideoTimeRef.current + 0.01) {
+        lastVideoTimeRef.current = video.currentTime;
+        notePlaybackProgress();
+      }
+      if (!duration || Number.isNaN(duration) || !Number.isFinite(duration)) return;
       const raw = Math.min(100, Math.round((video.currentTime / duration) * 100));
       const next = readyRef.current
         ? Math.min(99, raw)
@@ -79,43 +154,79 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
     };
 
     const handleEnded = () => {
-      videoEndedRef.current = true;
+      markVideoDone();
       video.pause();
-      if (!readyRef.current) {
-        setProgress((prev) => Math.max(prev, WAITING_PROGRESS_CAP));
-        return;
-      }
       tryFinish();
     };
 
     const handleError = () => {
-      videoEndedRef.current = true;
+      markVideoDone();
       tryFinish();
+      if (readyRef.current) {
+        completeOnce();
+      }
     };
 
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('ended', handleEnded);
     video.addEventListener('error', handleError);
+    video.addEventListener('stalled', notePlaybackProgress);
+    video.addEventListener('waiting', notePlaybackProgress);
+
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      handleLoadedMetadata();
+    } else {
+      video.load();
+    }
 
     return () => {
+      window.clearTimeout(hardCapTimer);
+      window.clearInterval(stallTimer);
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('error', handleError);
+      video.removeEventListener('stalled', notePlaybackProgress);
+      video.removeEventListener('waiting', notePlaybackProgress);
       video.pause();
     };
-  }, [open, onComplete]);
+  }, [open, completeOnce, forceFinishOverlay, markVideoDone, tryFinish]);
 
-  // Si los datos llegan después de que el video ya terminó, cerrar el overlay
+  useEffect(() => {
+    if (!open || !ready || completedRef.current) return undefined;
+
+    if (videoEndedRef.current) {
+      completeOnce();
+      return undefined;
+    }
+
+    const graceMs =
+      progressRef.current >= 85
+        ? 900
+        : progressRef.current >= 50
+          ? READY_SKIP_GRACE_MS
+          : READY_SKIP_GRACE_MS + 1500;
+
+    const timer = window.setTimeout(() => {
+      if (completedRef.current) return;
+      markVideoDone();
+      completeOnce();
+    }, graceMs);
+
+    return () => window.clearTimeout(timer);
+  }, [open, ready, completeOnce, markVideoDone]);
+
   useEffect(() => {
     if (!open || !ready || completedRef.current || !videoEndedRef.current) {
       return undefined;
     }
 
-    completedRef.current = true;
-    setProgress(100);
-    const timer = window.setTimeout(() => onComplete?.(), 320);
-    return () => window.clearTimeout(timer);
-  }, [open, ready, onComplete]);
+    completeOnce();
+    return undefined;
+  }, [open, ready, completeOnce]);
 
   const label = stageLabel(progress);
 
@@ -188,8 +299,10 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
                 ref={videoRef}
                 src={VIDEO_SRC}
                 muted
+                autoPlay
                 playsInline
                 preload="auto"
+                disablePictureInPicture
                 style={{
                   width: '100%',
                   height: '100%',

@@ -271,14 +271,16 @@ export default function BaifyAiChatPanel({ onClose, onMinimize }) {
         sx={{
           flex: 1,
           overflowY: 'auto',
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch',
           minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
           bgcolor: t.bg,
         }}
       >
         {!hasConversation ? (
-          <BaifyAiChatWelcome onSelectPrompt={submitText} disabled={sendBlocked} />
+          <Box sx={{ minHeight: '100%', boxSizing: 'border-box' }}>
+            <BaifyAiChatWelcome onSelectPrompt={submitText} disabled={sendBlocked} />
+          </Box>
         ) : (
           <Box
             sx={{

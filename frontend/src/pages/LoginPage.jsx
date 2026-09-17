@@ -10,6 +10,16 @@ import Aurora from '../components/Aurora';
 import InventoryEntryOverlay from '../components/InventoryEntryOverlay';
 import { prefetchDashboardData } from '../utils/dashboardPrefetch';
 
+const PREFETCH_TIMEOUT_MS = 14_000;
+
+function prefetchDashboardWithTimeout(profile) {
+  return Promise.race([
+    prefetchDashboardData(profile),
+    new Promise((_, reject) => {
+      window.setTimeout(() => reject(new Error('prefetch-timeout')), PREFETCH_TIMEOUT_MS);
+    }),
+  ]);
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -43,9 +53,10 @@ export default function LoginPage() {
       setUserProfile(profile);
       setEntryReady(false);
       setEntering(true);
-      prefetchDashboardData(profile)
+      setLoading(false);
+      prefetchDashboardWithTimeout(profile)
         .catch(() => {
-          // Si falla el prefetch, no bloquear la entrada; el dashboard reintentará
+          // Si falla o tarda el prefetch, no bloquear la entrada; el dashboard reintentará
         })
         .finally(() => {
           setEntryReady(true);

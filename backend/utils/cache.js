@@ -65,6 +65,43 @@ async function set(key, value, ttlSeconds = DEFAULT_TTL_SECONDS) {
 }
 
 /**
+ * INCR atómico con TTL en la primera escritura (rate limits).
+ * @returns {Promise<number|null>} nuevo contador o null si Redis no está disponible
+ */
+async function increment(key, ttlSeconds = DEFAULT_TTL_SECONDS) {
+    if (!redis) return null;
+    try {
+        const count = await redis.incr(key);
+        if (count === 1) {
+            await redis.expire(key, ttlSeconds);
+        }
+        return count;
+    } catch (error) {
+        console.warn(`[Cache] increment falló (${key}):`, error.message);
+        return null;
+    }
+}
+
+/**
+ * @returns {Promise<void>}
+ */
+async function decrement(key) {
+    if (!redis) return;
+    try {
+        const next = await redis.decr(key);
+        if (next <= 0) {
+            await redis.del(key);
+        }
+    } catch (error) {
+        console.warn(`[Cache] decrement falló (${key}):`, error.message);
+    }
+}
+
+export function isStatsRedisConfigured() {
+    return Boolean(redis);
+}
+
+/**
  * Elimina todas las claves que empiezan por el prefijo (SCAN + DEL).
  * @param {string} prefix
  * @returns {Promise<void>}
@@ -91,5 +128,7 @@ async function clearByPrefix(prefix) {
 export const statsCache = {
     get,
     set,
+    increment,
+    decrement,
     clearByPrefix
 };
