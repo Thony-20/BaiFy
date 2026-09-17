@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Box, Fab, Paper, Slide, useMediaQuery, useTheme } from '@mui/material';
 import { AutoAwesome as AutoAwesomeIcon } from '@mui/icons-material';
 import BaifyAiChatPanel from './BaifyAiChatPanel';
@@ -33,22 +34,28 @@ export default function FloatingBaifyChat() {
     setPanelOpen(false);
   };
 
-  return (
+  const anchorBottom = isMobile
+    ? 'calc(12px + env(safe-area-inset-bottom, 0px))'
+    : 'calc(24px + env(safe-area-inset-bottom, 0px))';
+  const anchorRight = isMobile ? 12 : 24;
+
+  const ui = (
     <Box
+      data-baify-chat-root
       sx={{
         position: 'fixed',
         zIndex: (th) => th.zIndex.modal + 1,
         pointerEvents: 'none',
         ...(isMobile
           ? {
-              right: 12,
-              bottom: 12,
+              right: anchorRight,
+              bottom: anchorBottom,
               left: panelOpen ? 12 : 'auto',
               top: 'auto',
             }
           : {
-              right: 24,
-              bottom: 24,
+              right: anchorRight,
+              bottom: anchorBottom,
               left: 'auto',
               display: 'flex',
               flexDirection: 'column',
@@ -133,4 +140,7 @@ export default function FloatingBaifyChat() {
       ) : null}
     </Box>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(ui, document.body);
 }

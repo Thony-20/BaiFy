@@ -13,6 +13,10 @@ export default defineConfig({
       includeAssets: ['LOGO2.png', 'icon-192x192.png', 'icon-512x512.png', 'screenshot-desktop.png', 'screenshot-mobile.png'],
       workbox: {
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        // Cada build genera hashes nuevos; el SW anterior se reemplaza al detectar el deploy
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
       },
       manifest: {
         id: '/',
