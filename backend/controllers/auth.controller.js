@@ -1,6 +1,7 @@
 import { adminDb, adminAuth } from '../config/firebase.js';
 import { firebaseClientConfig } from '../config/firebase.js';
 import { statsCache } from '../utils/cache.js';
+import { clearBaifyAiSnapshotCache } from '../utils/baifyAiCache.js';
 
 const FIREBASE_API_KEY = firebaseClientConfig.apiKey;
 const IDENTITY_TOOLKIT_URL = `https://identitytoolkit.googleapis.com/v1/accounts`;
@@ -317,6 +318,8 @@ export const updateCompanySettings = async (req, res) => {
                 statsCache.clearByPrefix(`products-expiring-${empresaId}`)
             ]);
         }
+
+        await clearBaifyAiSnapshotCache(empresaId);
 
         res.status(200).json({ message: "Configuraciones actualizadas correctamente", settings: updateData });
     } catch (error) {

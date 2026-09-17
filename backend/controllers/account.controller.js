@@ -13,6 +13,7 @@ import {
 } from '../utils/paymentMethods.js';
 import { applyEmpresaStatsDelta } from '../utils/empresaStats.js';
 import { clearNotificationsCache } from '../utils/notificationCache.js';
+import { clearBaifyAiSnapshotCache } from '../utils/baifyAiCache.js';
 
 const COLLECTION = 'cuentas';
 const DAILY_STATS_COLLECTION = 'metricas_diarias';
@@ -1019,7 +1020,10 @@ export const registerPayment = async (req, res) => {
         });
 
         if (result.empresaId) {
-            const clears = [clearNotificationsCache(result.empresaId)];
+            const clears = [
+                clearNotificationsCache(result.empresaId),
+                clearBaifyAiSnapshotCache(result.empresaId),
+            ];
             if (result.shouldApplySalesMetrics) {
                 clears.push(
                     statsCache.clearByPrefix(`sales-${result.empresaId}`),
@@ -1152,6 +1156,7 @@ export const backfillCxCPaymentMetrics = async (req, res) => {
             statsCache.clearByPrefix(`sales-${empresaId}`),
             statsCache.clearByPrefix(`dashboard-${empresaId}`),
             statsCache.clearByPrefix(`history-${empresaId}`),
+            clearBaifyAiSnapshotCache(empresaId),
         ]);
 
         res.status(200).json({

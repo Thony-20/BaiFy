@@ -19,19 +19,14 @@ import {
 } from 'recharts';
 import ChartReadyContainer from './ChartReadyContainer';
 
-const CustomTooltip = ({ active, payload, label, theme, usdRate }) => {
+const CustomTooltip = ({ active, payload, theme }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     const isDark = theme.palette.mode === 'dark';
     const historicalRate = Number(data.exchangeRate);
-    const hasCashUsd = Number(data.cashUsd) > 0;
-    const liveUsdRate = typeof usdRate === 'number' && usdRate > 0 ? usdRate : 0;
-    const rate = hasCashUsd && liveUsdRate > 0
-      ? liveUsdRate
-      : (historicalRate > 0
-        ? historicalRate
-        : (data.revenue > 0 ? (data.revenueBs / data.revenue) : 0));
-    const rateLabel = hasCashUsd && liveUsdRate > 0 ? 'Tasa BCV:' : 'Tasa BCV del día:';
+    const rate = historicalRate > 0
+      ? historicalRate
+      : (data.revenue > 0 ? (data.revenueBs / data.revenue) : 0);
 
     return (
       <Box sx={{
@@ -70,7 +65,7 @@ const CustomTooltip = ({ active, payload, label, theme, usdRate }) => {
           </Box>
 
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: `1px solid ${alpha(theme.palette.divider, 0.5)}`, pt: 1 }}>
-            <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>{rateLabel}</Typography>
+            <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>Tasa BCV del día:</Typography>
             <Typography variant="caption" sx={{ fontWeight: 800, color: theme.palette.primary.main }}>
               {rate > 0 ? rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : 'N/A'}
             </Typography>
@@ -99,7 +94,6 @@ const RevenueBalanceChart = ({
   trendOrders = { percent: 0, isUp: true },
   selectedMetric = 'revenue',
   onMetricChange,
-  usdRate = null
 }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
@@ -346,12 +340,11 @@ const RevenueBalanceChart = ({
 
               <Tooltip
                 content={<CustomTooltip
-                  usdRate={usdRate}
-                  theme={{ 
-                  ...theme, 
-                  metricLabel: currentConfig.tooltipLabel, 
+                  theme={{
+                  ...theme,
+                  metricLabel: currentConfig.tooltipLabel,
                   metricFormat: currentConfig.tooltipFormat,
-                  selectedMetric 
+                  selectedMetric
                 }} />}
                 cursor={{ stroke: alpha(currentConfig.color, 0.2), strokeWidth: 2 }}
               />

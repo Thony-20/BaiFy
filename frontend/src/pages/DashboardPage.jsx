@@ -417,15 +417,6 @@ export default function DashboardPage() {
 
   const metricCards = [
     {
-      title: 'Total Productos',
-      value: totalProducts.toLocaleString('es-VE'),
-      icon: <InventoryIcon />,
-      color: '#3B82F6',
-      subtitle: 'Productos totales de tu inventario',
-      bgColor: 'rgba(59, 130, 246, 0.12)',
-      extra: totalStock > 0 ? `${totalStock.toLocaleString('es-VE')} uds. en stock` : undefined,
-    },
-    {
       title: 'Valor Inventario',
       value: stats?.totalInventoryValue !== undefined ? `$${inventoryValue.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Optimizando...',
       icon: <MoneyIcon />,
@@ -440,8 +431,8 @@ export default function DashboardPage() {
       title: 'Inversión inventario',
       value: stats ? `$${costValue.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Calculando...',
       icon: <InvestmentIcon />,
-      color: '#3B82F6',
-      bgColor: 'rgba(59, 130, 246, 0.12)',
+      color: '#00D9A6',
+      bgColor: 'rgba(0, 217, 166, 0.12)',
       subtitle: stats
         ? (activeRate ? `≈ Bs. ${Number((costValue * activeRate).toFixed(2)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Cargando...')
         : 'Cargando...',
@@ -461,6 +452,15 @@ export default function DashboardPage() {
       extra: profitMargin !== null ? `Margen estimado: ${profitMargin}%` : undefined,
     },
     {
+      title: 'Total Productos',
+      value: totalProducts.toLocaleString('es-VE'),
+      icon: <InventoryIcon />,
+      color: '#3B82F6',
+      subtitle: 'Productos totales de tu inventario',
+      bgColor: 'rgba(59, 130, 246, 0.12)',
+      extra: totalStock > 0 ? `${totalStock.toLocaleString('es-VE')} uds. en stock` : undefined,
+    },
+    {
       title: 'Stock Bajo',
       value: lowStockCount,
       icon: <WarningIcon />,
@@ -472,15 +472,6 @@ export default function DashboardPage() {
         ? { value: Math.round((lowStockCount / totalProducts) * 100), label: 'Del total de productos' }
         : undefined,
       badge: lowStockCount > 0 ? { label: 'Revisar stock', severity: 'warning' } : undefined,
-    },
-    {
-      title: 'Total Stock',
-      value: totalStock.toLocaleString('es-VE'),
-      icon: <StockIcon />,
-      color: '#3B82F6',
-      bgColor: 'rgba(59, 130, 246, 0.12)',
-      subtitle: 'Unidades totales de productos',
-      extra: avgStockPerProduct !== null ? `~${avgStockPerProduct.toLocaleString('es-VE')} uds. por producto` : undefined,
     },
     {
       title: 'Próximos a Vencer',
@@ -505,6 +496,15 @@ export default function DashboardPage() {
         ? { value: Math.round((expiredCount / totalProducts) * 100), label: 'Del catálogo activo' }
         : undefined,
       badge: expiredCount > 0 ? { label: 'Acción urgente', severity: 'error' } : undefined,
+    },
+    {
+      title: 'Total Stock',
+      value: totalStock.toLocaleString('es-VE'),
+      icon: <StockIcon />,
+      color: '#3B82F6',
+      bgColor: 'rgba(59, 130, 246, 0.12)',
+      subtitle: 'Unidades totales de productos',
+      extra: avgStockPerProduct !== null ? `~${avgStockPerProduct.toLocaleString('es-VE')} uds. por producto` : undefined,
     },
   ];
 

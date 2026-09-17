@@ -9,6 +9,7 @@ import salesRoutes from './routes/sales.routes.js';
 import accountsRoutes from './routes/accounts.routes.js';
 import clientsRoutes from './routes/clients.routes.js';
 import notificationsRoutes from './routes/notifications.routes.js';
+import chatRoutes from './routes/chat.routes.js';
 import { firestoreMeterMiddleware } from './utils/readMeter.js';
 
 dotenv.config({ quiet: true });
@@ -28,6 +29,7 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/accounts', accountsRoutes);
 app.use('/api/clients', clientsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/chat', chatRoutes);
 
 export default app;
 

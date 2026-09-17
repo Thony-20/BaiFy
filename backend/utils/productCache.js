@@ -1,5 +1,6 @@
 import { statsCache } from './cache.js';
 import { clearNotificationsCache } from './notificationCache.js';
+import { clearBaifyAiSnapshotCache } from './baifyAiCache.js';
 
 /**
  * Invalida toda la caché de productos de una empresa.
@@ -17,5 +18,6 @@ export async function clearProductCaches(empresaId) {
         statsCache.clearByPrefix(`products-expiring-${empresaId}`),
         statsCache.clearByPrefix(`products-expired-${empresaId}`),
         clearNotificationsCache(empresaId),
+        clearBaifyAiSnapshotCache(empresaId),
     ]);
 }

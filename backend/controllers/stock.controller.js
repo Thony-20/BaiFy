@@ -4,6 +4,7 @@ import { getStartOfDayCaracas, getEndOfDayCaracas } from '../utils/dateUtils.js'
 import { statsCache } from '../utils/cache.js';
 import { applyEmpresaStatsDelta } from '../utils/empresaStats.js';
 import { clearProductCaches } from '../utils/productCache.js';
+import { clearBaifyAiSnapshotCache } from '../utils/baifyAiCache.js';
 
 const MOVIMIENTOS_COLLECTION = 'movimientos_stock';
 const PRODUCTOS_COLLECTION = 'productos';
@@ -568,6 +569,7 @@ export const recalculateStats = async (req, res) => {
 
         await adminDb.collection('empresa_stats').doc(empresaId).set(statsData, { merge: true });
         await statsCache.clearByPrefix(`dashboard-${empresaId}`);
+        await clearBaifyAiSnapshotCache(empresaId);
 
         res.status(200).json({ message: "Sincronización completada", stats: statsData });
     } catch (error) {

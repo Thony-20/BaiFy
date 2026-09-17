@@ -51,6 +51,7 @@ import toast from 'react-hot-toast';
 import UpgradePlanModal from './UpgradePlanModal';
 import TechBackground from './TechBackground';
 import NotificationBell from './NotificationBell';
+import FloatingBaifyChat from './FloatingBaifyChat';
 import useCurrencyStore from '../store/useCurrencyStore';
 import useThemeStore from '../store/useThemeStore';
 import {
@@ -800,6 +801,8 @@ export default function Layout({ children }) {
       >
         {renderMainContent()}
       </Box>
+
+      <FloatingBaifyChat />
     </Box>
   );
 }

@@ -20,6 +20,7 @@ import {
     shouldApplyCxCPaymentMetrics,
 } from '../utils/paymentMethods.js';
 import { clearNotificationsCache } from '../utils/notificationCache.js';
+import { clearBaifyAiSnapshotCache } from '../utils/baifyAiCache.js';
 
 const SALES_COLLECTION = 'ventas';
 const PRODUCTS_COLLECTION = 'productos';
@@ -42,6 +43,7 @@ async function clearEmpresaSaleCaches(empresaId) {
         statsCache.clearByPrefix(`products-search-${empresaId}`),
         statsCache.clearByPrefix(`products-search-hits-${empresaId}`),
         clearNotificationsCache(empresaId),
+        clearBaifyAiSnapshotCache(empresaId),
     ]);
 }
 

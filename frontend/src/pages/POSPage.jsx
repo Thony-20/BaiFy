@@ -20,7 +20,6 @@ import {
   Alert,
   CircularProgress,
   Paper,
-  Tooltip,
   FormControlLabel,
   Switch,
   Dialog,
@@ -70,7 +69,6 @@ import useCurrencyStore from '../store/useCurrencyStore';
 import { generateSalesReportPDF } from '../utils/reportGenerator';
 import {
   CheckCircle as VerifiedIcon,
-  FlashOn as LiveIcon,
   Refresh as RefreshIcon,
   PictureAsPdf as PdfIcon
 } from '@mui/icons-material';
@@ -539,26 +537,6 @@ export default function POSPage() {
           </Box>
         )}
 
-        {/* Tasa y Acciones */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {activeTab === 0 && (
-            <Tooltip title={`Actualizado: ${useCurrencyStore.getState().lastExchangeRefresh ? new Date(useCurrencyStore.getState().lastExchangeRefresh).toLocaleTimeString() : 'Recién'}`}>
-              <Chip
-                icon={<LiveIcon style={{ fontSize: '14px', color: '#22C55E' }} />}
-                label={`Tasa: ${activeRate} Bs.`}
-                size="small"
-                sx={{
-                  fontWeight: 800,
-                  borderRadius: '8px',
-                  bgcolor: 'rgba(34, 197, 94, 0.1)',
-                  color: '#22C55E',
-                  border: '1px solid rgba(34, 197, 94, 0.2)',
-                  px: 0.5
-                }}
-              />
-            </Tooltip>
-          )}
-        </Box>
       </Box>
 
       {/* --- CONTENIDO PRINCIPAL --- */}

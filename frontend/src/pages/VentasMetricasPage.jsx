@@ -59,15 +59,6 @@ function liveDayRevenueBs(day, usdRate) {
   return Math.max(0, histBs - cashUsdBsHist) + liveCashUsdBs;
 }
 
-function liveDayProfitBs(day, usdRate) {
-  const histBs = Number(day.profitBs || 0);
-  const lockedUsd = Number(day.profitCashUsd || 0);
-  const liveLockedBs = usdToCurrentBs(lockedUsd, usdRate);
-  if (liveLockedBs == null) return histBs;
-  const lockedBsHist = historicalUsdBs(lockedUsd, day.profitCashUsdBs, dayRateFromHistory(day));
-  return Math.max(0, histBs - lockedBsHist) + liveLockedBs;
-}
-
 function dayRateFromHistory(day) {
   if (Number(day.exchangeRate) > 0) return Number(day.exchangeRate);
   const revenue = Number(day.revenue || 0);
@@ -384,12 +375,6 @@ export default function VentasMetricasPage() {
       ? lockedProfitBsLive + otherProfitBs
       : Number(stats?.grossProfitBs || 0);
 
-    const historyLive = history.map((day) => ({
-      ...day,
-      revenueBs: liveDayRevenueBs(day, usdRate),
-      profitBs: liveDayProfitBs(day, usdRate),
-    }));
-
     const totalOrders = stats?.totalOrders || 0;
     const totalUnits = stats?.totalUnitsSold || 0;
     const avgUnitsPerOrder = totalOrders > 0 ? (totalUnits / totalOrders).toFixed(1) : null;
@@ -413,7 +398,6 @@ export default function VentasMetricasPage() {
         icon: <MoneyIcon />,
         color: '#00D9A6',
         bgColor: 'rgba(0, 217, 166, 0.12)',
-        trend: calculateTrend(historyLive, 'revenueBs'),
         isCurrency: true,
         currencySymbol: sym,
         extra: totalOrders > 0 ? `${totalOrders.toLocaleString('es-VE')} ventas registradas` : undefined,
@@ -425,7 +409,6 @@ export default function VentasMetricasPage() {
         icon: <TrendingUpIcon />,
         color: '#00D9A6',
         bgColor: 'rgba(0, 217, 166, 0.12)',
-        trend: calculateTrend(historyLive, 'profitBs'),
         isCurrency: true,
         currencySymbol: selectedCurrency === 'EUR' ? '€' : '$',
         extra: profitMargin !== null ? `Margen: ${profitMargin}%` : undefined,
@@ -437,7 +420,6 @@ export default function VentasMetricasPage() {
         icon: <ShoppingCartIcon />,
         color: '#3B82F6',
         bgColor: 'rgba(59, 130, 246, 0.12)',
-        trend: calculateTrend(history, 'units'),
         isCurrency: false,
         extra: avgUnitsPerOrder !== null ? `Promedio: ~${avgUnitsPerOrder} uds. por venta` : undefined,
       },
@@ -448,7 +430,6 @@ export default function VentasMetricasPage() {
         icon: <ReceiptIcon />,
         color: '#3B82F6',
         bgColor: 'rgba(59, 130, 246, 0.12)',
-        trend: calculateTrend(history, 'orders'),
         isCurrency: false,
         extra: totalUnits > 0 ? `${totalUnits.toLocaleString('es-VE')} unidades movidas` : undefined,
       },
@@ -998,7 +979,6 @@ export default function VentasMetricasPage() {
               trendOrders={ordersTrend}
               selectedMetric={selectedMetric}
               onMetricChange={setSelectedMetric}
-              usdRate={usdRate}
             />
           </Box>
         </>
