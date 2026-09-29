@@ -21,10 +21,17 @@ import {
     getTopSellingProductsForAi,
 } from './baifyAiSalesMetrics.js';
 import { formatIntegerForAi, formatMoneyForAi } from './baifyAiFormat.js';
+import {
+    getAccountsOverviewForAi,
+    getProductRankingForAi,
+    queryClientsForAi,
+} from './baifyAiInsights.js';
 
 const PRODUCTOS_COLLECTION = 'productos';
 const CLIENTES_COLLECTION = 'clientes';
 const MAX_TOOL_RESULTS = 8;
+const PERIOD_DESCRIPTION =
+    'today, week (7d), month (30d), year (1 ene del año actual → hoy) o custom con from/to';
 
 function maxToolCallsPerRequest() {
     const fromEnv = Number(process.env.BAIFY_AI_MAX_TOOL_CALLS);
@@ -47,7 +54,8 @@ export function pickProductForAi(product) {
         nombre: product.nombre ?? null,
         sku: product.sku ?? null,
         stock: product.stock ?? null,
-        precio: product.precio ?? null,
+        // El precio de venta se guarda como `valor`.
+        precio: product.valor ?? product.precio ?? null,
         costo: product.costo ?? null,
         estado: product.estado ?? null,
         fechaVencimiento: product.fechaVencimiento ?? null,
@@ -74,8 +82,9 @@ export function pickClientForAi(client, currencyLabel) {
 function withProductMoney(products, currencyLabel) {
     return products.map((p) => ({
         ...p,
-        precioFormatted: formatMoneyForAi(p.precio, currencyLabel),
-        costoFormatted: formatMoneyForAi(p.costo, currencyLabel),
+        // Precios del catálogo en USD (el POS muestra el equivalente en Bs aparte).
+        precioFormatted: formatMoneyForAi(p.precio, 'USD'),
+        costoFormatted: formatMoneyForAi(p.costo, 'USD'),
     }));
 }
 
@@ -267,7 +276,7 @@ export function createBaifyAiTools(ctx) {
     return {
         searchProducts: tool({
             description:
-                `Busca productos activos de ${ctx.businessName} por nombre o SKU. Usar cuando pregunten por un producto concreto o stock de un ítem.`,
+                `Busca productos activos de la empresa por nombre o SKU. Usar cuando pregunten por un producto concreto o stock de un ítem.`,
             inputSchema: z.object({
                 query: z.string().min(2).describe('Nombre o SKU del producto'),
                 limit: z.number().int().min(1).max(MAX_TOOL_RESULTS).optional(),
@@ -281,7 +290,7 @@ export function createBaifyAiTools(ctx) {
 
         listLowStockProducts: tool({
             description:
-                `Lista productos con stock bajo (≤ umbral) de ${ctx.businessName}. Usar cuando pregunten qué falta en inventario o stock crítico.`,
+                `Lista productos con stock bajo (≤ umbral) de la empresa. Usar cuando pregunten qué falta en inventario o stock crítico.`,
             inputSchema: z.object({
                 limit: z.number().int().min(1).max(MAX_TOOL_RESULTS).optional(),
             }),
@@ -298,7 +307,7 @@ export function createBaifyAiTools(ctx) {
 
         getInventoryAlerts: tool({
             description:
-                `Obtiene alertas de inventario (agotado, bajo stock, vencimientos) ya calculadas para ${ctx.businessName}.`,
+                `Obtiene alertas de inventario (agotado, bajo stock, vencimientos) ya calculadas para la empresa.`,
             inputSchema: z.object({
                 limit: z.number().int().min(1).max(MAX_TOOL_RESULTS).optional(),
             }),
@@ -306,34 +315,14 @@ export function createBaifyAiTools(ctx) {
                 guard(() => getInventoryAlertsForAi(empresaId, limit ?? 8)),
         }),
 
-        getClientByCedula: tool({
-            description:
-                `Busca un cliente de ${ctx.businessName} por cédula/documento. Usar cuando den un número de identificación.`,
-            inputSchema: z.object({
-                cedula: z.string().min(5).describe('Cédula o documento del cliente'),
-            }),
-            execute: async ({ cedula }) =>
-                guard(() => getClientByCedulaForAi(empresaId, cedula, currencyLabel)),
-        }),
-
-        searchClientsByName: tool({
-            description:
-                `Busca clientes de ${ctx.businessName} por nombre (prefijo). Usar si mencionan un nombre sin cédula.`,
-            inputSchema: z.object({
-                name: z.string().min(2).describe('Nombre o parte del nombre'),
-                limit: z.number().int().min(1).max(MAX_TOOL_RESULTS).optional(),
-            }),
-            execute: async ({ name, limit }) =>
-                guard(() => searchClientsByNameForAi(empresaId, name, limit ?? 5, currencyLabel)),
-        }),
-
         getSalesReport: tool({
             description:
-                `PREFERIR cuando pidan ventas Y top productos juntos. Devuelve resumen del periodo + ranking en una sola consulta (${ctx.businessName}).`,
+                `PREFERIR cuando pidan ventas Y top productos juntos. Devuelve resumen del periodo + ranking en una sola consulta (empresa autenticada).`,
             inputSchema: z.object({
-                period: z.enum(['today', 'week', 'month', 'custom']).optional(),
-                from: z.string().optional(),
-                to: z.string().optional(),
+                period: z.enum(['today', 'week', 'month', 'year', 'custom']).optional()
+                    .describe(PERIOD_DESCRIPTION),
+                from: z.string().optional().describe('YYYY-MM-DD si period=custom'),
+                to: z.string().optional().describe('YYYY-MM-DD si period=custom (omitir = hasta hoy)'),
                 topLimit: z.number().int().min(1).max(10).optional(),
             }),
             execute: async ({ period, from, to, topLimit }) =>
@@ -361,6 +350,7 @@ export function createBaifyAiTools(ctx) {
                         topRequested: safeTop,
                         currencyLabel,
                         includeTop: true,
+                        topUnavailableNote: report.topUnavailableNote,
                     });
                     return {
                         ...report,
@@ -375,14 +365,14 @@ export function createBaifyAiTools(ctx) {
 
         getSalesSummary: tool({
             description:
-                `Solo resumen de ventas de ${ctx.businessName} (usa getSalesReport si también piden top productos).`,
+                `Solo resumen de ventas de la empresa (usa getSalesReport si también piden top productos).`,
             inputSchema: z.object({
                 period: z
-                    .enum(['today', 'week', 'month', 'custom'])
+                    .enum(['today', 'week', 'month', 'year', 'custom'])
                     .optional()
-                    .describe('today, week (7d), month (30d) o custom'),
+                    .describe(PERIOD_DESCRIPTION),
                 from: z.string().optional().describe('YYYY-MM-DD si period=custom'),
-                to: z.string().optional().describe('YYYY-MM-DD si period=custom'),
+                to: z.string().optional().describe('YYYY-MM-DD si period=custom (omitir = hasta hoy)'),
             }),
             execute: async ({ period, from, to }) =>
                 guard(async () => {
@@ -412,11 +402,12 @@ export function createBaifyAiTools(ctx) {
 
         getTopSellingProducts: tool({
             description:
-                `Solo top productos vendidos de ${ctx.businessName} (usa getSalesReport si también piden resumen de ventas).`,
+                `Solo top productos vendidos de la empresa (usa getSalesReport si también piden resumen de ventas).`,
             inputSchema: z.object({
-                period: z.enum(['today', 'week', 'month', 'custom']).optional(),
-                from: z.string().optional(),
-                to: z.string().optional(),
+                period: z.enum(['today', 'week', 'month', 'year', 'custom']).optional()
+                    .describe(PERIOD_DESCRIPTION),
+                from: z.string().optional().describe('YYYY-MM-DD si period=custom'),
+                to: z.string().optional().describe('YYYY-MM-DD si period=custom (omitir = hasta hoy)'),
                 limit: z.number().int().min(1).max(10).optional(),
             }),
             execute: async ({ period, from, to, limit }) =>
@@ -460,9 +451,63 @@ export function createBaifyAiTools(ctx) {
                 }),
         }),
 
+        queryClients: tool({
+            description:
+                `Consulta TODA la sección Clientes de la empresa: buscar por teléfono, cédula o nombre ("¿de quién es este número?"), `
+                + 'clientes que visitaron/compraron en una fecha o rango, que compraron un producto, por nivel, estado de crédito, '
+                + 'con deuda, activos/inactivos o sin comprar hace N días; ranking por gasto, compras, unidades, puntos, deuda o última compra. '
+                + 'Devuelve la ficha completa (cédula, teléfono, nivel, puntos, crédito, deuda, historial de compras).',
+            inputSchema: z.object({
+                phone: z.string().optional().describe('Teléfono (cualquier formato, ej. 04123481899)'),
+                cedula: z.string().optional().describe('Cédula / documento'),
+                name: z.string().optional().describe('Nombre o parte del nombre'),
+                visitDate: z.string().optional().describe('Día de visita/compra: YYYY-MM-DD o DD/MM/YYYY'),
+                visitFrom: z.string().optional().describe('Inicio de rango de visitas (YYYY-MM-DD)'),
+                visitTo: z.string().optional().describe('Fin de rango de visitas (YYYY-MM-DD, omitir = hoy)'),
+                product: z.string().optional().describe('Solo clientes que compraron este producto (nombre o parte)'),
+                nivel: z.enum(['nuevo', 'regular', 'vip']).optional(),
+                creditoEstado: z.enum(['sin_asignar', 'habilitado', 'denegado']).optional(),
+                conDeuda: z.boolean().optional().describe('Solo clientes con saldo pendiente por cobrar'),
+                estado: z.enum(['activo', 'inactivo']).optional().describe('activo = compró en los últimos 30 días'),
+                minDiasSinComprar: z.number().int().min(1).optional(),
+                sortBy: z.enum(['gasto', 'gastoMensual', 'compras', 'unidades', 'puntos', 'deuda', 'ultimaCompra', 'nombre']).optional()
+                    .describe(
+                        'gasto = total histórico; gastoMensual = promedio mensual (total ÷ meses desde su primera compra, '
+                        + 'para "gasta más mensualmente/al mes/en promedio"). Para "este mes" usa gasto + visitFrom = día 1 del mes. '
+                        + 'Con filtro de fecha/producto, gasto/compras/unidades se miden dentro del filtro'
+                    ),
+                order: z.enum(['desc', 'asc']).optional(),
+                limit: z.number().int().min(1).max(20).optional(),
+            }),
+            execute: async (input) => guard(() => queryClientsForAi(empresaId, input)),
+        }),
+
+        getAccountsOverview: tool({
+            description:
+                `Resumen en vivo de cuentas por cobrar y por pagar de la empresa: total pendiente, vencidas, principales deudores/proveedores y próximos vencimientos.`,
+            inputSchema: z.object({
+                tipo: z.enum(['por_cobrar', 'por_pagar', 'todas']).optional(),
+                limit: z.number().int().min(1).max(10).optional(),
+            }),
+            execute: async ({ tipo, limit }) =>
+                guard(() => getAccountsOverviewForAi(empresaId, { tipo, limit })),
+        }),
+
+        getProductRanking: tool({
+            description:
+                `Ranking del catálogo de la empresa: productos más caros/baratos (precio), con más/menos stock, mayor valor de inventario (valor), más vendidos de todo el historial (vendidos), mejor margen (margen) o próximos a vencer (vencimiento).`,
+            inputSchema: z.object({
+                sortBy: z.enum(['precio', 'stock', 'valor', 'vendidos', 'vencimiento', 'margen']).optional(),
+                order: z.enum(['desc', 'asc']).optional().describe('desc = mayor primero (default)'),
+                limit: z.number().int().min(1).max(10).optional(),
+            }),
+            execute: async ({ sortBy, order, limit }) =>
+                guard(() => getProductRankingForAi(empresaId, { sortBy, order, limit })),
+        }),
+
         getAccountAlerts: tool({
             description:
-                `Alertas de cuentas por cobrar y clientes (desde caché) para ${ctx.businessName}.`,
+                `Alertas de cuentas por cobrar y clientes (desde caché) para la empresa.`,
             inputSchema: z.object({
                 limit: z.number().int().min(1).max(MAX_TOOL_RESULTS).optional(),
             }),
@@ -472,7 +517,7 @@ export function createBaifyAiTools(ctx) {
 
         getRecentSales: tool({
             description:
-                `Últimas ventas/comprobantes de ${ctx.businessName} (más recientes primero).`,
+                `Últimas ventas/comprobantes de la empresa (más recientes primero).`,
             inputSchema: z.object({
                 limit: z.number().int().min(1).max(8).optional(),
             }),
@@ -488,7 +533,7 @@ export function createBaifyAiTools(ctx) {
 
         findSaleByInvoiceId: tool({
             description:
-                `Busca un comprobante/venta de ${ctx.businessName} por su número de factura o ID.`,
+                `Busca un comprobante/venta de la empresa por su número de factura o ID.`,
             inputSchema: z.object({
                 invoiceId: z.string().min(2).describe('Número o ID del comprobante'),
             }),

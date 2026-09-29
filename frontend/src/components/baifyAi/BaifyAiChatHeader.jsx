@@ -7,12 +7,15 @@ import {
 } from '@mui/icons-material';
 import { useBaifyAiTokens } from './baifyAiTokens';
 import BaifyAiMascot from './BaifyAiMascot';
+import BaifyAiUsageIndicator from './BaifyAiUsageIndicator';
 
 export default function BaifyAiChatHeader({
   businessName,
   onNewChat,
   onMinimize,
   onClose,
+  usage,
+  visible = true,
 }) {
   const t = useBaifyAiTokens();
 
@@ -50,6 +53,7 @@ export default function BaifyAiChatHeader({
       </Stack>
 
       <Stack direction="row" spacing={0.25} alignItems="center">
+        <BaifyAiUsageIndicator usage={usage} visible={visible} />
         <Tooltip title="Nueva conversación">
           <IconButton
             size="small"

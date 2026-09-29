@@ -10,7 +10,8 @@ export const BAIFY_AI_SNAPSHOT_TTL_SECONDS = 10 * 60;
 
 const PRODUCTOS_COLLECTION = 'productos';
 
-const tenantCacheKey = (uid) => `baify-ai-tenant:${uid}`;
+// v2: incluye planId (cupo de tokens por plan).
+const tenantCacheKey = (uid) => `baify-ai-tenant:v2:${uid}`;
 const snapshotCacheKey = (empresaId) => `baify-ai-snapshot:${empresaId}`;
 
 /** Solo si falta en empresa_stats: 1 agregación count (máx. cada TTL de snapshot). */
@@ -92,6 +93,7 @@ export async function resolveBaifyAiTenant(uid) {
             'la moneda configurada en la cuenta',
         rol: profile.rol || null,
         lowStockThreshold: empresaData.lowStockThreshold ?? 5,
+        planId: empresaData.planId || 'free',
         cachedAt: new Date().toISOString(),
     };
 

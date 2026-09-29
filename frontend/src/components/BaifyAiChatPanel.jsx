@@ -25,10 +25,12 @@ import BaifyAiMascot from './baifyAi/BaifyAiMascot';
 function getMessageText(message) {
   if (!message) return '';
   if (Array.isArray(message.parts) && message.parts.length > 0) {
+    // Cada paso (antes/después de una tool) llega como parte separada: sepáralas
+    // con línea en blanco para que no queden palabras pegadas.
     return message.parts
-      .filter((part) => part.type === 'text')
-      .map((part) => part.text)
-      .join('');
+      .filter((part) => part.type === 'text' && part.text?.trim())
+      .map((part) => part.text.trim())
+      .join('\n\n');
   }
   if (typeof message.content === 'string') return message.content;
   if (Array.isArray(message.content)) {
@@ -41,7 +43,17 @@ function getMessageText(message) {
 }
 
 function formatChatError(error) {
-  const msg = error?.message || '';
+  let msg = error?.message || '';
+  // El backend responde { error, code }; el transport entrega el cuerpo como texto.
+  try {
+    const parsed = JSON.parse(msg);
+    if (parsed?.error) msg = parsed.error;
+  } catch {
+    // no es JSON
+  }
+  if (/tokens mensuales|BAIFY_AI_TOKEN_LIMIT/i.test(msg)) {
+    return msg;
+  }
   if (/límite diario|BAIFY_AI_DAILY_LIMIT/i.test(msg)) {
     return msg.includes('límite diario')
       ? msg
@@ -106,9 +118,9 @@ function TypingIndicator() {
 }
 
 /**
- * @param {{ onClose?: () => void, onMinimize?: () => void }} props
+ * @param {{ onClose?: () => void, onMinimize?: () => void, visible?: boolean }} props
  */
-export default function BaifyAiChatPanel({ onClose, onMinimize }) {
+export default function BaifyAiChatPanel({ onClose, onMinimize, visible = true }) {
   const t = useBaifyAiTokens();
   const { userProfile } = useAuthStore();
   const [input, setInput] = useState('');
@@ -118,6 +130,19 @@ export default function BaifyAiChatPanel({ onClose, onMinimize }) {
   const bottomRef = useRef(null);
   const stickToBottomRef = useRef(true);
   const lastPromptRef = useRef('');
+  const [usage, setUsage] = useState(null);
+
+  const refreshUsage = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await apiFetch(`${API_URL}/chat/usage`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) setUsage(await res.json());
+    } catch {
+      // La barra es informativa: si falla, el chat sigue funcionando.
+    }
+  }, []);
 
   const transport = useMemo(
     () =>
@@ -139,7 +164,13 @@ export default function BaifyAiChatPanel({ onClose, onMinimize }) {
   const isBusy = status === 'submitted' || status === 'streaming';
   const businessName = userProfile?.empresaNombre || 'tu comercio';
   const hasConversation = messages.length > 0;
-  const sendBlocked = isBusy || cooldownSec > 0;
+  const quotaExhausted = Boolean(usage?.exhausted);
+  const sendBlocked = isBusy || cooldownSec > 0 || quotaExhausted;
+
+  // Uso al abrir el chat y después de cada respuesta (o error, p. ej. cupo agotado).
+  useEffect(() => {
+    if (status === 'ready' || status === 'error') refreshUsage();
+  }, [status, refreshUsage]);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -238,7 +269,15 @@ export default function BaifyAiChatPanel({ onClose, onMinimize }) {
         onNewChat={requestNewChat}
         onMinimize={handleMinimize}
         onClose={onClose}
+        usage={usage}
+        visible={visible}
       />
+
+      {quotaExhausted ? (
+        <Alert severity="warning" sx={{ borderRadius: 0, py: 0.5, fontSize: '0.8rem' }}>
+          Tu empresa agotó el cupo mensual de BayFi AI. Toca el ícono de uso para ver cuándo se renueva.
+        </Alert>
+      ) : null}
 
       {cooldownSec > 0 ? (
         <Alert
@@ -293,10 +332,15 @@ export default function BaifyAiChatPanel({ onClose, onMinimize }) {
               boxSizing: 'border-box',
             }}
           >
-            {messages.map((message) => {
+            {messages.map((message, index) => {
               const isUser = message.role === 'user';
-              const text = getMessageText(message);
-              if (!text) return null;
+              const isStreamingLast = isBusy && index === messages.length - 1;
+              let text = getMessageText(message);
+              if (!text) {
+                // Respuesta terminada sin texto (p. ej. solo llamó tools): no dejarla invisible.
+                if (isUser || isStreamingLast || error) return null;
+                text = 'No pude completar esta respuesta. Intenta reformular la pregunta o usa **Reintentar**.';
+              }
 
               return (
                 <Box
@@ -350,7 +394,14 @@ export default function BaifyAiChatPanel({ onClose, onMinimize }) {
         sendDisabled={sendBlocked}
       />
 
-      <Dialog open={confirmNewOpen} onClose={() => setConfirmNewOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={confirmNewOpen}
+        onClose={() => setConfirmNewOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        // Por encima del chat flotante (zIndex.modal + 1).
+        sx={{ zIndex: (theme) => theme.zIndex.modal + 2 }}
+      >
         <DialogTitle>Nueva conversación</DialogTitle>
         <DialogContent>
           <DialogContentText>

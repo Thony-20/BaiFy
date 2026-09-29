@@ -7,7 +7,10 @@ const DAILY_STATS_COLLECTION = 'metricas_diarias';
 const PRODUCT_STATS_COLLECTION = 'metricas_productos_diarias';
 const SALES_COLLECTION = 'ventas';
 const BAIFY_AI_SALES_CACHE_TTL = 5 * 60;
-const MAX_RANGE_DAYS = 90;
+/** Resumen: 1 doc de metricas_diarias por día → hasta 1 año es barato. */
+export const MAX_SUMMARY_RANGE_DAYS = 366;
+/** Top productos: 1 doc por producto y día → rango más corto para no disparar lecturas. */
+export const MAX_TOP_RANGE_DAYS = 90;
 const MAX_TOP_PRODUCTS = 10;
 
 function formatDateCaracas(dateRef = new Date()) {
@@ -34,21 +37,30 @@ function daysBetweenInclusive(fromStr, toStr) {
  * @param {string} [from]
  * @param {string} [to]
  */
-export function resolveSalesDateRange(period = 'month', from, to) {
+export function resolveSalesDateRange(period = 'month', from, to, maxDays = MAX_SUMMARY_RANGE_DAYS) {
     const todayStr = formatDateCaracas(new Date());
 
+    if (period === 'year') {
+        return { from: `${todayStr.slice(0, 4)}-01-01`, to: todayStr, period: 'year' };
+    }
+
     if (period === 'custom') {
-        if (!from || !to) {
-            return { error: 'Para period custom indica from y to (YYYY-MM-DD).' };
+        if (!from) {
+            return { error: 'Para period custom indica from (YYYY-MM-DD). Corrige la llamada o pide la fecha al usuario.' };
         }
-        const span = daysBetweenInclusive(from, to);
+        // Sin "to" o con fecha futura → hasta hoy.
+        const toStr = !to || String(to) > todayStr ? todayStr : String(to);
+        const span = daysBetweenInclusive(from, toStr);
         if (span == null || span < 1) {
-            return { error: 'Fechas inválidas. Usa formato YYYY-MM-DD.' };
+            return { error: 'Fechas inválidas (usa YYYY-MM-DD y from <= to). No reintentes: explica al usuario y pide otra fecha.' };
         }
-        if (span > MAX_RANGE_DAYS) {
-            return { error: `Rango máximo ${MAX_RANGE_DAYS} días.` };
+        if (span > maxDays) {
+            return {
+                error: `El rango pedido (${span} días) supera el máximo de ${maxDays} días para esta consulta. No reintentes: díselo al usuario y sugiérele un rango más corto.`,
+                rangeTooLong: true,
+            };
         }
-        return { from, to, period: 'custom' };
+        return { from, to: toStr, period: 'custom' };
     }
 
     const end = new Date();
@@ -180,7 +192,7 @@ export async function findSaleByInvoiceIdForAi(empresaId, invoiceId) {
 
 export async function getSalesSummaryForAi(empresaId, period = 'month', from, to) {
     const range = resolveSalesDateRange(period, from, to);
-    if (range.error) return { error: range.error };
+    if (range.error) return range;
 
     const cacheKey = salesCacheKey(empresaId, range.from, range.to);
     const cached = await statsCache.get(cacheKey);
@@ -239,8 +251,8 @@ export async function getTopSellingProductsForAi(
     to,
     limit = 5
 ) {
-    const range = resolveSalesDateRange(period, from, to);
-    if (range.error) return { error: range.error };
+    const range = resolveSalesDateRange(period, from, to, MAX_TOP_RANGE_DAYS);
+    if (range.error) return range;
 
     const safeLimit = Math.min(Math.max(1, limit), MAX_TOP_PRODUCTS);
     const cacheKey = rankingCacheKey(empresaId, safeLimit, range.from, range.to);
@@ -344,6 +356,7 @@ export function buildSalesReportPresentation({
     currencyLabel,
     includeTop = true,
     includeFinancial = true,
+    topUnavailableNote = null,
 }) {
     const ingreso =
         summary.totalRevenueFormatted
@@ -359,6 +372,17 @@ export function buildSalesReportPresentation({
         `- **Ventas:** ${ventas ?? '0'}`,
         `- **Ticket promedio:** ${ticket ?? 'no disponible'}`,
     ].join('\n');
+
+    if (topUnavailableNote && includeFinancial) {
+        return {
+            presentationHint: `${financialBlock}
+
+${topUnavailableNote}`,
+            topRequested: topRequested ?? null,
+            topReturned: 0,
+            topShortfallNote: topUnavailableNote,
+        };
+    }
 
     if (!includeTop && includeFinancial) {
         return {
@@ -426,14 +450,18 @@ export async function getSalesReportForAi(
     ]);
 
     if (summary.error) return { error: summary.error };
-    if (top.error) return { error: top.error };
+    // Rango largo: el resumen sí se puede dar aunque el top no.
+    if (top.error && !top.rangeTooLong) return { error: top.error };
 
     return {
         period: summary.period,
         from: summary.from,
         to: summary.to,
         summary,
-        topProducts: top.products,
+        topProducts: top.error ? [] : top.products,
+        topUnavailableNote: top.error
+            ? `Nota: el top de productos solo está disponible para rangos de hasta ${MAX_TOP_RANGE_DAYS} días.`
+            : null,
         topLimitRequested: topLimit,
     };
 }

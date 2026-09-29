@@ -114,7 +114,7 @@ export default function FloatingBaifyChat() {
             }}
           >
             {everOpened ? (
-              <BaifyAiChatPanel onClose={hidePanel} onMinimize={hidePanel} />
+              <BaifyAiChatPanel onClose={hidePanel} onMinimize={hidePanel} visible={panelOpen} />
             ) : null}
           </Paper>
         </Box>
