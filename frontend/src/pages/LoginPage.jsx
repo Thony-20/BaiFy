@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { CircularProgress } from '@mui/material';
 import { ArrowRight, User, Lock, Eye, EyeOff } from 'lucide-react';
@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import Aurora from '../components/Aurora';
 import InventoryEntryOverlay from '../components/InventoryEntryOverlay';
 import { prefetchDashboardData } from '../utils/dashboardPrefetch';
+import { preloadEntryVideo } from '../utils/entryVideoPreload';
 
 const PREFETCH_TIMEOUT_MS = 14_000;
 
@@ -31,6 +32,11 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
   const { setUser, setUserProfile } = useAuthStore();
+
+  // Descargar el video de entrada mientras el usuario escribe, para que no se trabe al iniciar sesión
+  useEffect(() => {
+    preloadEntryVideo();
+  }, []);
 
   const handleEntryComplete = useCallback(() => {
     toast.success('¡Bienvenido de vuelta!');
@@ -89,13 +95,16 @@ export default function LoginPage() {
       }}
     >
       {/* Aurora background */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-        <Aurora
-          colorStops={['#7cff67', '#B497CF', '#5227FF']}
-          amplitude={0.8}
-          blend={0.3}
-        />
-      </div>
+      {/* Se desmonta durante la entrada: el WebGL compite con el video en móviles */}
+      {!entering && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+          <Aurora
+            colorStops={['#7cff67', '#B497CF', '#5227FF']}
+            amplitude={0.8}
+            blend={0.3}
+          />
+        </div>
+      )}
 
       {/* Login Card */}
       <div

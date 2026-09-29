@@ -1,22 +1,29 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { getEntryVideoSrc } from '../utils/entryVideoPreload';
 
 const STAGES = [
   { until: 22, label: 'Abriendo tu cuenta' },
   { until: 48, label: 'Ordenando inventario' },
   { until: 72, label: 'Acomodando productos' },
-  { until: 90, label: 'Preparando tu panel' },
+  { until: 99, label: 'Preparando tu panel' },
   { until: 100, label: '¡Todo listo!' },
 ];
 
-const VIDEO_SRC = '/login-inventory.mp4';
-const WAITING_PROGRESS_CAP = 95;
 /** Nunca dejar al usuario atrapado en el overlay (red lenta / prefetch colgado). */
-const OVERLAY_HARD_CAP_MS = 18_000;
-/** Tras tener datos listos, esperar un poco al video y luego continuar (Android a veces no dispara `ended`). */
-const READY_SKIP_GRACE_MS = 3_500;
-/** Sin avance de reproducción → tratar el video como terminado o fallido. */
-const PLAYBACK_STALL_MS = 7_000;
+const OVERLAY_HARD_CAP_MS = 20_000;
+/** Sin avance de reproducción → tratar el video como no disponible y seguir solo la carga del sistema. */
+const PLAYBACK_STALL_MS = 5_000;
+/** Mientras el sistema carga, el % avanza de forma asintótica hacia este tope (nunca 100 sin datos). */
+const SYSTEM_START = 12;
+const SYSTEM_WAIT_CAP = 90;
+const SYSTEM_EASE_MS = 3_000;
+/** Velocidad máxima de la barra (%/s) para que el tramo final siempre se vea llegar a 100. */
+const MAX_SPEED_PER_SEC = 70;
+/** Pausa en 100% antes de entrar al panel. */
+const DONE_HOLD_MS = 450;
+/** Android a veces no dispara `ended`: margen para darlo por terminado. */
+const END_EPSILON_S = 0.12;
 
 function stageLabel(progress) {
   const stage = STAGES.find((s) => progress <= s.until) ?? STAGES[STAGES.length - 1];
@@ -25,64 +32,49 @@ function stageLabel(progress) {
 
 /**
  * Pantalla de entrada post-login con el video de inventario + progreso.
- * Termina cuando los datos están listos y el video acabó (o fallbacks en móvil).
+ * El % es el mínimo entre el avance del video y la carga real del sistema (`ready`):
+ * solo llega a 100 cuando ambos terminaron. Si el sistema tarda, el video se repite;
+ * si el video no puede reproducirse, la barra sigue solo a la carga del sistema.
  */
 export default function InventoryEntryOverlay({ open, ready = false, onComplete }) {
   const videoRef = useRef(null);
-  const completedRef = useRef(false);
-  const videoEndedRef = useRef(false);
+  const barRef = useRef(null);
   const readyRef = useRef(ready);
-  const progressRef = useRef(0);
-  const lastPlaybackAtRef = useRef(0);
-  const lastVideoTimeRef = useRef(0);
-  const playbackStartedRef = useRef(false);
+  const onCompleteRef = useRef(onComplete);
   const [progress, setProgress] = useState(0);
+  const [videoSrc, setVideoSrc] = useState(null);
 
-  readyRef.current = ready;
-  progressRef.current = progress;
-
-  const completeOnce = useCallback(() => {
-    if (completedRef.current) return;
-    completedRef.current = true;
-    setProgress(100);
-    window.setTimeout(() => onComplete?.(), 320);
-  }, [onComplete]);
-
-  const markVideoDone = useCallback(() => {
-    videoEndedRef.current = true;
-    setProgress((prev) => Math.max(prev, WAITING_PROGRESS_CAP));
-  }, []);
-
-  const tryFinish = useCallback(() => {
-    if (!readyRef.current || !videoEndedRef.current) return;
-    completeOnce();
-  }, [completeOnce]);
-
-  const forceFinishOverlay = useCallback(() => {
-    markVideoDone();
-    completeOnce();
-  }, [completeOnce, markVideoDone]);
+  useEffect(() => {
+    readyRef.current = ready;
+    onCompleteRef.current = onComplete;
+  }, [ready, onComplete]);
 
   useEffect(() => {
     if (!open) {
       setProgress(0);
-      completedRef.current = false;
-      videoEndedRef.current = false;
-      playbackStartedRef.current = false;
-      lastPlaybackAtRef.current = 0;
-      lastVideoTimeRef.current = 0;
-      return undefined;
+      setVideoSrc(null);
+      return;
     }
+    setVideoSrc(getEntryVideoSrc());
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !videoSrc) return undefined;
 
     const video = videoRef.current;
     if (!video) return undefined;
 
-    completedRef.current = false;
-    videoEndedRef.current = false;
-    playbackStartedRef.current = false;
-    lastPlaybackAtRef.current = Date.now();
-    lastVideoTimeRef.current = 0;
-    video.currentTime = 0;
+    const openedAt = performance.now();
+    let rafId = 0;
+    let finishTimer = 0;
+    let videoDone = false;
+    let forced = false;
+    let displayed = 0;
+    let shownInt = -1;
+    let lastFrameAt = openedAt;
+    let lastVideoTime = -1;
+    let lastVideoAdvanceAt = openedAt;
+
     video.loop = false;
     video.muted = true;
     video.defaultMuted = true;
@@ -91,142 +83,105 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
     video.setAttribute('webkit-playsinline', 'true');
     video.setAttribute('x5-playsinline', 'true');
 
-    const hardCapTimer = window.setTimeout(forceFinishOverlay, OVERLAY_HARD_CAP_MS);
-
-    const stallTimer = window.setInterval(() => {
-      if (completedRef.current || videoEndedRef.current) return;
-      const sinceProgress = Date.now() - lastPlaybackAtRef.current;
-      if (sinceProgress >= PLAYBACK_STALL_MS) {
-        markVideoDone();
-        tryFinish();
-        if (readyRef.current) {
-          completeOnce();
-        }
-      }
-    }, 800);
-
-    const notePlaybackProgress = () => {
-      lastPlaybackAtRef.current = Date.now();
-    };
-
-    const startPlayback = () => {
-      if (playbackStartedRef.current || completedRef.current) return;
-      playbackStartedRef.current = true;
-      notePlaybackProgress();
-
-      const playPromise = video.play();
-      if (playPromise && typeof playPromise.then === 'function') {
-        playPromise
-          .then(() => notePlaybackProgress())
-          .catch(() => {
-            markVideoDone();
-            tryFinish();
-            if (readyRef.current) {
-              completeOnce();
-            }
-          });
+    const markVideoDone = () => {
+      if (videoDone) return;
+      videoDone = true;
+      // Si el sistema aún no está listo, repetir el video en vez de dejarlo congelado.
+      if (!readyRef.current && !video.error) {
+        video.loop = true;
+        const p = video.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
       }
     };
 
-    const handleLoadedMetadata = () => {
-      notePlaybackProgress();
-      if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
-        startPlayback();
+    const tryPlay = () => {
+      if (videoDone) return;
+      const p = video.play();
+      if (p && typeof p.catch === 'function') {
+        // Autoplay bloqueado (p. ej. iOS en modo ahorro de energía): seguir solo con la carga del sistema.
+        p.catch(() => markVideoDone());
       }
     };
 
-    const handleCanPlay = () => {
-      startPlayback();
-    };
+    video.addEventListener('canplay', tryPlay);
+    video.addEventListener('ended', markVideoDone);
+    video.addEventListener('error', markVideoDone);
 
-    const handleTimeUpdate = () => {
-      const duration = video.duration;
-      if (video.currentTime > lastVideoTimeRef.current + 0.01) {
-        lastVideoTimeRef.current = video.currentTime;
-        notePlaybackProgress();
-      }
-      if (!duration || Number.isNaN(duration) || !Number.isFinite(duration)) return;
-      const raw = Math.min(100, Math.round((video.currentTime / duration) * 100));
-      const next = readyRef.current
-        ? Math.min(99, raw)
-        : Math.min(WAITING_PROGRESS_CAP, raw);
-      setProgress(next);
-    };
-
-    const handleEnded = () => {
-      markVideoDone();
-      video.pause();
-      tryFinish();
-    };
-
-    const handleError = () => {
-      markVideoDone();
-      tryFinish();
-      if (readyRef.current) {
-        completeOnce();
-      }
-    };
-
-    video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('canplay', handleCanPlay);
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('ended', handleEnded);
-    video.addEventListener('error', handleError);
-    video.addEventListener('stalled', notePlaybackProgress);
-    video.addEventListener('waiting', notePlaybackProgress);
-
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-      handleLoadedMetadata();
+    video.currentTime = 0;
+    if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      tryPlay();
     } else {
       video.load();
     }
 
+    const hardCapTimer = window.setTimeout(() => {
+      forced = true;
+      markVideoDone();
+    }, OVERLAY_HARD_CAP_MS);
+
+    const tick = (now) => {
+      const dt = Math.min(100, now - lastFrameAt);
+      lastFrameAt = now;
+      const elapsed = now - openedAt;
+
+      // Avance del video (leído por frame, no con `timeupdate`, para que la barra sea fluida)
+      if (!videoDone) {
+        const { currentTime, duration } = video;
+        if (currentTime > lastVideoTime + 0.01) {
+          lastVideoTime = currentTime;
+          lastVideoAdvanceAt = now;
+        } else if (now - lastVideoAdvanceAt >= PLAYBACK_STALL_MS) {
+          markVideoDone();
+        }
+        if (duration && Number.isFinite(duration) && currentTime >= duration - END_EPSILON_S) {
+          markVideoDone();
+        }
+      }
+      const { duration } = video;
+      const videoPct = videoDone
+        ? 100
+        : duration && Number.isFinite(duration)
+          ? (video.currentTime / duration) * 100
+          : 0;
+
+      // Carga del sistema: sube sola hacia SYSTEM_WAIT_CAP y solo llega a 100 con los datos listos
+      const systemReady = readyRef.current || forced;
+      const systemPct = systemReady
+        ? 100
+        : SYSTEM_START + (SYSTEM_WAIT_CAP - SYSTEM_START) * (1 - Math.exp(-elapsed / SYSTEM_EASE_MS));
+
+      const target = Math.min(videoPct, systemPct);
+      if (target > displayed) {
+        const eased = displayed + (target - displayed) * Math.min(1, dt / 180);
+        displayed = Math.min(eased, displayed + (MAX_SPEED_PER_SEC * dt) / 1000);
+        if (target - displayed < 0.05) displayed = target;
+      }
+
+      if (barRef.current) barRef.current.style.width = `${displayed}%`;
+      const nextInt = Math.floor(displayed);
+      if (nextInt !== shownInt) {
+        shownInt = nextInt;
+        setProgress(nextInt);
+      }
+
+      if (systemReady && videoDone && displayed >= 100) {
+        finishTimer = window.setTimeout(() => onCompleteRef.current?.(), DONE_HOLD_MS);
+        return;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
     return () => {
+      cancelAnimationFrame(rafId);
       window.clearTimeout(hardCapTimer);
-      window.clearInterval(stallTimer);
-      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('canplay', handleCanPlay);
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('ended', handleEnded);
-      video.removeEventListener('error', handleError);
-      video.removeEventListener('stalled', notePlaybackProgress);
-      video.removeEventListener('waiting', notePlaybackProgress);
+      window.clearTimeout(finishTimer);
+      video.removeEventListener('canplay', tryPlay);
+      video.removeEventListener('ended', markVideoDone);
+      video.removeEventListener('error', markVideoDone);
       video.pause();
     };
-  }, [open, completeOnce, forceFinishOverlay, markVideoDone, tryFinish]);
-
-  useEffect(() => {
-    if (!open || !ready || completedRef.current) return undefined;
-
-    if (videoEndedRef.current) {
-      completeOnce();
-      return undefined;
-    }
-
-    const graceMs =
-      progressRef.current >= 85
-        ? 900
-        : progressRef.current >= 50
-          ? READY_SKIP_GRACE_MS
-          : READY_SKIP_GRACE_MS + 1500;
-
-    const timer = window.setTimeout(() => {
-      if (completedRef.current) return;
-      markVideoDone();
-      completeOnce();
-    }, graceMs);
-
-    return () => window.clearTimeout(timer);
-  }, [open, ready, completeOnce, markVideoDone]);
-
-  useEffect(() => {
-    if (!open || !ready || completedRef.current || !videoEndedRef.current) {
-      return undefined;
-    }
-
-    completeOnce();
-    return undefined;
-  }, [open, ready, completeOnce]);
+  }, [open, videoSrc]);
 
   const label = stageLabel(progress);
 
@@ -248,9 +203,8 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
             alignItems: 'center',
             justifyContent: 'center',
             padding: '1.5rem',
-            background: 'rgba(6, 8, 18, 0.78)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
+            // Fondo casi opaco en vez de backdrop-filter: el blur a pantalla completa traba el video en móviles
+            background: 'rgba(6, 8, 18, 0.94)',
           }}
           role="status"
           aria-live="polite"
@@ -297,7 +251,7 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
             >
               <video
                 ref={videoRef}
-                src={VIDEO_SRC}
+                src={videoSrc ?? undefined}
                 muted
                 autoPlay
                 playsInline
@@ -340,18 +294,17 @@ export default function InventoryEntryOverlay({ open, ready = false, onComplete 
                 }}
               >
                 <motion.div
+                  ref={barRef}
                   style={{
+                    width: '0%',
                     height: '100%',
                     borderRadius: 999,
                     background: 'linear-gradient(90deg, #38bdf8, #7cff67, #a78bfa)',
                     backgroundSize: '200% 100%',
+                    willChange: 'width',
                   }}
-                  animate={{
-                    width: `${progress}%`,
-                    backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
-                  }}
+                  animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
                   transition={{
-                    width: { duration: 0.15, ease: 'linear' },
                     backgroundPosition: { duration: 2.4, repeat: Infinity, ease: 'linear' },
                   }}
                 />
